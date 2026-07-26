@@ -6,7 +6,7 @@
 #
 # During install (hermes plugins install), the entire repo is
 # cloned. Install via:
-#   hermes plugins install xunlinkx/hermes-chess
+#   hermes plugins install xunlinkx/chess
 # Or for dev, symlink/copy src/hermes_chess/ directly.
 name: hermes-chess
 version: 1.0.0
