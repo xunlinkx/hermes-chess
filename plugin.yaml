@@ -9,7 +9,7 @@
 #   hermes plugins install xunlinkx/chess
 # Or for dev, symlink/copy src/hermes_chess/ directly.
 name: hermes-chess
-version: 1.0.0
+version: 1.1.0
 description: "Persistent local human-versus-Stockfish chess with deterministic rules, durable per-messaging-identity state, and interrupted-turn recovery."
 author: xunlinkx
 kind: standalone

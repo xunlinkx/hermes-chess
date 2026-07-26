@@ -13,6 +13,12 @@ metadata:
 Use chess_game for every chess operation. Its SQLite database and
 python-chess rules are authoritative; chat memory is not.
 
+## CHESS: prefix
+
+Every chess message returned by the /chess slash handler is prefixed
+with "CHESS:" so it stands out among other agent messages, cron job
+output, or system responses in a messaging stream.
+
 ## ALWAYS check for existing game FIRST
 
 - The pre_llm_call hook injects context about any active game at the top of
@@ -58,6 +64,14 @@ python-chess rules are authoritative; chat memory is not.
   rematches, and help.
 - On rematch, ask whether to reuse settings or swap colors only when the
   request did not already specify it.
+- Use timer to toggle per-game timing on/off (chess_game with
+  timer: true/false/"status"). Timer is best-effort only: network latency,
+  agent availability, and interruptions make actual elapsed time an
+  approximation. Disabled by default. The slash command /chess timer [on|off|status]
+  routes to this action.
+- /chess status now returns a rich summary: game number, difficulty, your
+  color, whose turn, ply count, last move, and timer state — plus the board
+  diagram and PNG.
 
 ## Safety rules
 

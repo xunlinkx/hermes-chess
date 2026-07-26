@@ -406,7 +406,7 @@ class TestIdentityAndSecurity:
     def test_database_migration_initialization_and_permissions(self, service):
         integrity = service.db.integrity()
         assert integrity == {
-            "integrity": "ok", "foreign_key_errors": 0, "schema_version": 1
+            "integrity": "ok", "foreign_key_errors": 0, "schema_version": 2
         }
         assert os.stat(service.db.path).st_mode & 0o077 == 0
 

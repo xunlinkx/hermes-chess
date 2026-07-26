@@ -42,15 +42,15 @@ ALLOWED_ACTIONS = {
     "setup", "start", "move", "board", "status", "resume", "legal_moves",
     "hint", "analyze", "undo", "resign", "offer_draw", "accept_draw",
     "decline_draw", "set_difficulty", "get_difficulty", "set_color", "pgn",
-    "list_games", "rematch", "help",
+    "list_games", "rematch", "help", "timer",
 }
 ALLOWED_KEYS = {
     "action", "move", "difficulty", "color", "confirm", "rematch_mode",
-    "game_id", "detail",
+    "game_id", "detail", "timer",
 }
 MUTATING_ACTIONS = {
     "setup", "start", "move", "undo", "resign", "offer_draw", "accept_draw",
-    "decline_draw", "set_difficulty", "set_color", "rematch",
+    "decline_draw", "set_difficulty", "set_color", "rematch", "timer",
 }
 
 _LOCKS_GUARD = threading.Lock()
@@ -1067,7 +1067,36 @@ class ChessService:
         return self._read_with_recovery(identity, args, "Current saved board.")
 
     def _action_status(self, identity: Identity, args: dict[str, Any]):
-        return self._read_with_recovery(identity, args, "Current saved game status.")
+        game = _row_dict(self.db.active_game(identity.owner_key))
+        if not game or game["state"] != "active":
+            return self._read_with_recovery(identity, args, "Current saved game status.")
+        # Enrich status with game identity info for active games
+        decorated = self._decorate_game(game)
+        board = chess.Board(game["current_fen"])
+        turn = _color_name(board.turn)
+        human_color = game["human_color"]
+        difficulty = decorated["difficulty_label"]
+        last_move_san = decorated.get("last_move_san")
+        timer_on = bool(game.get("timer_enabled", False))
+        plys = self._get_current_ply(game["id"])
+        status_msg = (
+            f"Game #{game['id']} — {difficulty} · "
+            f"You are {human_color}, {turn} to move ({plys} plys played)"
+        )
+        if last_move_san:
+            status_msg += f" · Last move: {last_move_san}"
+        if timer_on:
+            status_msg += " · ⏱️ Timer on (best-effort)"
+        payload = self._read_with_recovery(identity, args, status_msg)
+        if isinstance(payload, dict) and payload.get("success"):
+            # Preserve recovery suffix if _read_with_recovery added one
+            existing = payload.get("message", "")
+            if "Recovered Stockfish move" in existing:
+                recovery_part = existing[existing.index("Recovered"):]
+                payload["message"] = f"{status_msg} {recovery_part}"
+            else:
+                payload["message"] = status_msg
+        return payload
 
     def _action_resume(self, identity: Identity, args: dict[str, Any]):
         return self._read_with_recovery(identity, args, "Resumed the saved game.")
@@ -1613,6 +1642,64 @@ class ChessService:
             "message": "Use normal chess conversation or /chess help; saved state is local and persistent.",
         }
 
+    def _action_timer(self, identity: Identity, args: dict[str, Any]):
+        """Toggle per-game timing on/off or query status.
+
+        Timer is best-effort: network latency, cellular handoffs, agent
+        availability, and interruptions make actual elapsed time an
+        approximation. Not suitable for tournament-level or fair-play
+        time control.
+        """
+        game = _row_dict(self.db.active_game(identity.owner_key))
+        if not game or game["state"] != "active":
+            return {
+                "success": True,
+                "timer_enabled": False,
+                "message": "No active game. Timer will be available once a game is started.",
+            }
+        timer_val = args.get("timer", "status")
+        if timer_val == "status" or isinstance(timer_val, bool):
+            enabled = bool(game.get("timer_enabled", False)) if timer_val == "status" else timer_val
+            current_label = "enabled (best-effort)" if enabled else "disabled"
+            return {
+                "success": True,
+                "timer_enabled": enabled,
+                "game_id": game["id"],
+                "message": (
+                    f"Timer is **{current_label}** for Game #{game['id']}. "
+                    f"Accuracy disclaimer: network latency, cellular handoffs, "
+                    f"agent availability, and interruptions mean actual elapsed "
+                    f"time may be longer than clock time. Not suitable for "
+                    f"tournament-level time control."
+                ),
+            }
+        enabled = timer_val is True or (isinstance(timer_val, str) and timer_val == "on")
+        with self.db.transaction(immediate=True) as conn:
+            conn.execute(
+                "UPDATE games SET timer_enabled=?, updated_at=? WHERE id=?",
+                (1 if enabled else 0, utc_now(), game["id"]),
+            )
+            self.db.event(
+                conn,
+                owner_key=identity.owner_key,
+                game_id=game["id"],
+                event_type="timer_toggle",
+                details={"timer_enabled": enabled},
+                message_id=identity.message_id or "",
+            )
+        state = "enabled (best-effort)" if enabled else "disabled"
+        return {
+            "success": True,
+            "timer_enabled": enabled,
+            "game_id": game["id"],
+            "message": (
+                f"Timer toggled **{state}** for Game #{game['id']}. "
+                f"Accuracy disclaimer: network latency, cellular handoffs, "
+                f"agent availability, and interruptions mean actual elapsed "
+                f"time may be longer than clock time."
+            ),
+        }
+
     def lightweight_context(self, identity: Identity) -> str | None:
         game = _row_dict(self.db.active_game(identity.owner_key))
         if not game:
@@ -1629,18 +1716,21 @@ class ChessService:
             if game.get("requested_color"):
                 chosen.append(f"color={game['requested_color']}")
             return (
-                "Chess setup is in progress for this messaging identity. "
+                "CHESS: Chess setup is in progress for this messaging identity. "
                 + (", ".join(chosen) + ". " if chosen else "")
                 + "Still required: "
                 + ", ".join(missing)
                 + ". Use chess_game; its database is authoritative."
             )
+        game = self._decorate_game(game)
         board = chess.Board(game["current_fen"])
         turn = _color_name(board.turn)
+        last_move = game.get("last_move_san")
+        last_move_clause = f" Last move: {last_move} by {game.get('last_move_actor')}." if last_move else ""
         return (
-            "This messaging identity has an active persisted chess game. "
-            f"Human={game['human_color']}; difficulty={self._decorate_game(game)['difficulty_label']}; "
-            f"turn={turn}; pending_engine={bool(game['pending_engine'])}. "
+            "CHESS: This messaging identity has an active persisted chess game. "
+            f"Human={game['human_color']}; difficulty={game['difficulty_label']}; "
+            f"turn={turn}; pending_engine={bool(game['pending_engine'])}.{last_move_clause} "
             "Treat plausible chess notation as a move and use chess_game. "
             "The plugin database is authoritative."
         )
@@ -1652,23 +1742,22 @@ class ChessService:
         game = _row_dict(self.db.active_game(identity.owner_key))
         if not game or game["state"] != "active":
             return None
+        game = self._decorate_game(game)
         board = chess.Board(game["current_fen"])
         turn = _color_name(board.turn)
         human_color = game["human_color"]
-        difficulty_label = self._decorate_game(game)["difficulty_label"]
-        # Count moves so far
-        conn = self.db.connect()
-        move_count = conn.execute(
-            "SELECT COUNT(*) FROM moves WHERE game_id=? AND undone=0",
-            (game["id"],),
-        ).fetchone()[0]
-        conn.close()
-        plys = move_count
-        return (
+        difficulty_label = game["difficulty_label"]
+        last_move_san = game.get("last_move_san")
+        last_move_actor = game.get("last_move_actor")
+        plys = self._get_current_ply(game["id"])
+        result = (
             f"**Game #{game['id']}** — {difficulty_label}\n"
-            f"You are **{human_color}**, it is **{turn}**'s turn ({plys} plys played)\n"
-            f"{board}"
+            f"You are **{human_color}**, it is **{turn}**'s turn ({plys} plys played)"
         )
+        if last_move_san:
+            result += f", last move: **{last_move_san}** by {last_move_actor}"
+        result += f"\n{board}"
+        return result
 
 
 __all__ = [

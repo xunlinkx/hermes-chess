@@ -13,6 +13,9 @@ Author: [xunlinkx](https://github.com/xunlinkx)
 - SQLite persistence — games survive restarts, engines crashes, network failures
 - Idempotent move handling — duplicate messages don't double-play
 - Remote skill integration — agents can start and play games via `/chess` commands
+- **`CHESS:` prefix** — every /chess output is prefixed so it stands out in a multi-agent message stream
+- **Rich status** — `/chess status` shows game ID, difficulty, colors, ply count, last move, timer state
+- **Per-game timer** — `/chess timer [on|off|status]` toggles best-effort timing (accuracy disclaimer included)
 
 ## Dependencies
 
@@ -141,17 +144,19 @@ hermes gateway restart
 ### Slash commands (in any supported Hermes chat — iMessage, Telegram, Discord, etc.)
 
 | Command | Description |
-|---|---|
+|---|---|---|
 | `/chess` | Start a new game (interactive prompts for difficulty and color) |
 | `/chess <difficulty>` | Start at a specific level (beginner / easy / casual / intermediate / advanced / expert / maximum) |
 | `/chess <difficulty> <color>` | Full start: `/chess beginner black`, `/chess casual white` |
 | `e2e4`, `Nf3`, `O-O` | Make a move (standard SAN notation) |
-| `/undo` | Undo last move pair |
-| `/resign` | Resign |
-| `/board` | Show current board state |
-| `/hint` | Get Stockfish's suggested move |
-| `/analyze` | Deep analysis of current position |
-| `/pgn` | Export game in PGN format |
+| `/chess status` | Show rich game status: game ID, difficulty, colors, ply count, last move, timer state + board |
+| `/chess timer [on\|off\|status]` | Toggle per-game best-effort timing or query current state |
+| `/chess undo` | Undo last move pair |
+| `/chess resign` | Resign |
+| `/chess board` | Show current board state |
+| `/chess hint` | Get Stockfish's suggested move |
+| `/chess analyze` | Deep analysis of current position |
+| `/chess pgn` | Export game in PGN format |
 
 ### Difficulty levels
 

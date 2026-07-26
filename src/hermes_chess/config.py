@@ -198,6 +198,11 @@ def current_identity() -> Identity:
         if not profile:
             profile = user_id or "default"
 
+    # IMPORTANT: session_key is included in the owner_key hash for completeness,
+    # but is currently empty ("") for most gateway platforms. If a platform
+    # starts providing a non-empty session_key, existing games under the old
+    # hash become orphaned. See commit f7e3240 (revert of session_key removal)
+    # for history. Any change here must consider migration of existing games.
     canonical = {
         "profile": profile,
         "platform": platform,

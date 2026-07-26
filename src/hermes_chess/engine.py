@@ -157,6 +157,11 @@ class StockfishRunner:
         if not self._semaphore.acquire(timeout=self.config.engine_timeout):
             raise EngineUnavailable("engine concurrency limit is busy")
         engine = None
+        # Hard wall-clock deadline: if the engine call itself exceeds
+        # 2x the configured timeout, we force-kill the subprocess.
+        # This guards against pathological positions where the UCI
+        # Limit is ignored by the engine.
+        hard_deadline = self.config.engine_timeout * 2
         try:
             health = self.probe()
             if not health.get("ready"):
@@ -167,30 +172,38 @@ class StockfishRunner:
             engine.timeout = self.config.engine_timeout
             options = self._options(engine, settings)
             limit, limit_data = self._limit(settings, analysis=analysis)
-            if analysis:
-                info = engine.analyse(
-                    board,
-                    limit,
-                    multipv=1,
-                    options=options,
-                    info=chess.engine.INFO_ALL,
-                )
-                if isinstance(info, list):
-                    info = info[0]
-                pv = list(info.get("pv") or [])
-                if not pv:
-                    raise EngineUnavailable("Stockfish returned no principal variation")
-                move = pv[0]
-            else:
-                result = engine.play(
-                    board,
-                    limit,
-                    options=options,
-                    info=chess.engine.INFO_ALL,
-                )
-                move = result.move
-                info = result.info or {}
-                pv = list(info.get("pv") or [move])
+            # Set a hard wall-clock watchdog that kills the engine
+            # process if the call exceeds the deadline.
+            _watchdog = threading.Timer(hard_deadline, lambda: self._cleanup(engine))
+            _watchdog.daemon = True
+            _watchdog.start()
+            try:
+                if analysis:
+                    info = engine.analyse(
+                        board,
+                        limit,
+                        multipv=1,
+                        options=options,
+                        info=chess.engine.INFO_ALL,
+                    )
+                    if isinstance(info, list):
+                        info = info[0]
+                    pv = list(info.get("pv") or [])
+                    if not pv:
+                        raise EngineUnavailable("Stockfish returned no principal variation")
+                    move = pv[0]
+                else:
+                    result = engine.play(
+                        board,
+                        limit,
+                        options=options,
+                        info=chess.engine.INFO_ALL,
+                    )
+                    move = result.move
+                    info = result.info or {}
+                    pv = list(info.get("pv") or [move])
+            finally:
+                _watchdog.cancel()
             if move not in board.legal_moves:
                 raise EngineUnavailable("Stockfish returned an illegal move")
             cp, mate = self._score(info, board)

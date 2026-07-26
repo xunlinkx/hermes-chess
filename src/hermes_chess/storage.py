@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def utc_now() -> str:
@@ -86,6 +86,8 @@ class ChessDatabase:
                 )
             if version < 1:
                 self._migrate_v1(conn)
+            if version < 2:
+                self._migrate_v2(conn)
         finally:
             conn.close()
 
@@ -189,6 +191,19 @@ class ChessDatabase:
 
             INSERT OR REPLACE INTO schema_meta(key,value)
                 VALUES('schema_version','1');
+            COMMIT;
+            """
+        )
+
+    @staticmethod
+    def _migrate_v2(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            BEGIN IMMEDIATE;
+            ALTER TABLE games ADD COLUMN timer_enabled INTEGER NOT NULL DEFAULT 0
+                CHECK(timer_enabled IN (0,1));
+            INSERT OR REPLACE INTO schema_meta(key,value)
+                VALUES('schema_version','2');
             COMMIT;
             """
         )
