@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-chess"
+version = "1.0.0"
+description = "Persistent local human-versus-Stockfish chess with PNG rendering, slash commands, and identity isolation"
+authors = [
+    {name = "xunlinkx", email = "xunlinkx@users.noreply.github.com"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-chess>=1.999",
+    "CairoSVG>=2.7",
+    "cffi>=1.15",
+]
+
+[project.urls]
+Homepage = "https://github.com/xunlinkx/hermes-chess"
+Repository = "https://github.com/xunlinkx/hermes-chess"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hermes_chess*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
