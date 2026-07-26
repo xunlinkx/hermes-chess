@@ -83,9 +83,25 @@ pip install -e ".[dev]"
 > **macOS only:** CairoSVG needs `libcairo.2.dylib` on the library load path.
 > Set `DYLD_LIBRARY_PATH=/opt/homebrew/lib` in your gateway startup script
 > (or use `brew --prefix cairo` to find the right path).
+>
+> **Note:** The defaults assume `$HERMES_HOME` is set (typically `~/.hermes`).
+> If running standalone without `HERMES_HOME`, the config falls back to
+> `~/.hermes` — create that directory or explicitly set all `HERMES_CHESS_*`
+> variables.
 
 > On Fedora/Bean, CairoSVG finds libcairo via the system linker automatically
 > after `dnf install cairo-devel` — no env var needed.
+
+### Common pitfalls
+
+| Issue | Symptom | Fix |
+|---|---|---|
+| **Stockfish not found** | `EngineUnavailable: Stockfish executable is missing` | `brew install stockfish` or set `HERMES_CHESS_STOCKFISH=/opt/homebrew/bin/stockfish` in your gateway env |
+| **Cairo library not loaded** | `OSError: no library called "cairo-2" was found` (macOS only) | Set `DYLD_LIBRARY_PATH=/opt/homebrew/lib` before starting the gateway |
+| **Gateway ignores plugin after update** | Old commands still work unchanged | You must restart the gateway: `hermes gateway restart` |
+| **Two profiles, one shares the same DB** | Moves from one profile appear in another | Each profile needs its own `HERMES_CHESS_DB` path, or use different `owner_key` values |
+| **Stockfish path vs brew location** | Plugin works in terminal but not in gateway | The gateway process may not have the same `PATH`. Set `HERMES_CHESS_STOCKFISH` explicitly to the absolute binary path |
+| **Plugin not registered** | `/chess` returns "unknown command" | Ensure `~/.hermes/plugins/chess/plugin.yaml` exists and gateway has been restarted. Verify with `hermes plugins list` |
 
 ## Usage
 
@@ -144,7 +160,7 @@ hermes-chess/
 │       └── storage.py           # SQLite schema + migrations
 ├── tests/
 │   ├── conftest.py
-│   ├── test_chess_service.py    # 53 unit tests
+│   ├── test_chess_service.py    # 54 unit tests
 │   └── e2e_tool_path.py         # Hermes integration test
 ├── pyproject.toml
 ├── LICENSE
