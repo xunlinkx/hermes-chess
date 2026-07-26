@@ -37,17 +37,29 @@ pip install python-chess CairoSVG
 
 ## Installation
 
-### As a Hermes plugin (standard)
+### Recommended: from GitHub (native Hermes plugin manager)
 
 ```bash
-# Clone into your Hermes plugins directory
+hermes plugins install xunlinkx/hermes-chess
+hermes gateway restart
+```
+
+This clones the repo into `~/.hermes/plugins/chess/` as a regular directory and
+the gateway discovers it automatically via `plugin.yaml`.
+
+To update later:
+
+```bash
+hermes plugins update chess
+hermes gateway restart         # only needed for handler/plugin.yaml changes
+```
+
+### Manual: clone into plugins directory
+
+```bash
 git clone https://github.com/xunlinkx/hermes-chess.git \
   ~/.hermes/plugins/chess
-
-# Install Python deps into your Hermes venv
-~/.hermes/.venv/bin/pip install python-chess CairoSVG
-
-# Restart gateway
+pip install python-chess CairoSVG    # into your Hermes venv
 hermes gateway restart
 ```
 

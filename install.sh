@@ -80,22 +80,30 @@ echo "  Installing Python packages ..."
 
 echo "[OK] Python dependencies installed."
 
-# ── Install as Hermes plugin (optional) ────────────────────────────
+# ── Install as Hermes plugin ────────────────────────────────────────
 echo ""
-echo "=== Hermes Plugin Installation (optional) ==="
-echo "  Target: $PLUGIN_DIR"
+echo "=== Hermes Plugin Installation ==="
 
-if [ ! -d "$PLUGIN_DIR" ]; then
-    echo "  HERMES_HOME not detected or plugins dir missing."
-    echo "  To install: ln -s \"$REPO_DIR/src/hermes_chess\" \"$PLUGIN_DIR\""
-    echo "  Or copy the source: cp -r \"$REPO_DIR/src/hermes_chess\" \"$PLUGIN_DIR\""
+if command -v hermes &>/dev/null; then
+    echo "  Hermes detected — installing via 'hermes plugins install' ..."
+    # Use the repo dir as source so hermes plugins install can work from local
+    if [ -d "$PLUGIN_DIR" ]; then
+        echo "  Plugin already installed at $PLUGIN_DIR, syncing source ..."
+        rsync -a --delete \
+            --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
+            "$REPO_DIR/src/hermes_chess/" "$PLUGIN_DIR/"
+    else
+        # hermes plugins install works from GitHub; if we're already cloned do it manually
+        mkdir -p "$(dirname "$PLUGIN_DIR")"
+        cp -r "$REPO_DIR/src/hermes_chess" "$PLUGIN_DIR"
+        echo "  Plugin installed at $PLUGIN_DIR"
+    fi
+    echo "  Run 'hermes gateway restart' to load the plugin."
 else
-    echo "  Plugin dir exists at $PLUGIN_DIR — updating ..."
-    # Copy source (not venv, not .git)
-    rsync -a --delete \
-        --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
-        "$REPO_DIR/src/hermes_chess/" "$PLUGIN_DIR/"
-    echo "[OK] Plugin files updated."
+    echo "  Hermes not detected. Manual install options:"
+    echo "    hermes plugins install xunlinkx/hermes-chess"
+    echo "    or clone directly:"
+    echo "      git clone https://github.com/xunlinkx/hermes-chess.git ~/.hermes/plugins/chess"
 fi
 
 # ── Verification ───────────────────────────────────────────────────
