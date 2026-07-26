@@ -69,6 +69,27 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+### Development workflow (updating the live plugin)
+
+This repo is the **canonical source**. Edit code in `src/hermes_chess/`, test it, then
+push changes to the live Hermes plugin:
+
+```bash
+# 1. Make changes and verify
+cd ~/hermes-chess   # your local clone
+pytest tests/
+
+# 2. Sync to the Hermes plugin directory
+rsync -a --delete src/hermes_chess/ ~/.hermes/plugins/chess/
+
+# 3. Restart gateway to pick up handler changes
+hermes gateway restart
+```
+
+> If you use a symlink (`ln -s src/hermes_chess ~/.hermes/plugins/chess`),
+> edits take effect immediately — only restart the gateway for plugin metadata
+> or handler registration changes.
+
 ## Environment Variables
 
 | Variable | Default | Description |
