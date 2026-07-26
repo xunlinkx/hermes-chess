@@ -660,21 +660,18 @@ class ChessService:
         game = _row_dict(self.db.active_game(identity.owner_key))
         supplied_complete = "difficulty" in args and "color" in args
         if game and game["state"] == "active":
-            if action == "start" and supplied_complete:
-                with self.db.transaction(immediate=True) as conn:
-                    current = dict(conn.execute(
-                        "SELECT * FROM games WHERE id=? AND owner_key=?",
-                        (game["id"], identity.owner_key),
-                    ).fetchone())
-                    self._archive_live_game(conn, current)
-                game = None
-            else:
-                payload = self._payload(game)
-                payload.update({
-                    "existing_game": True,
-                    "message": "An active game already exists. Resume it or start with complete new settings.",
-                })
-                return payload
+            # Never silently override an active game. Return existing game info
+            # even if complete args were supplied, so the user can decide.
+            payload = self._payload(game)
+            payload.update({
+                "existing_game": True,
+                "message": (
+                    "A game is already in progress. Use /chess resign to end it "
+                    "before starting a new one, or type /chess status to see "
+                    "the current game state."
+                ),
+            })
+            return payload
         if game is None:
             game = self._create_setup(identity)
         if game["state"] != "setup":
@@ -1646,6 +1643,31 @@ class ChessService:
             f"turn={turn}; pending_engine={bool(game['pending_engine'])}. "
             "Treat plausible chess notation as a move and use chess_game. "
             "The plugin database is authoritative."
+        )
+
+    def active_game_status(self, identity: Identity) -> str | None:
+        """Return a human-readable status string for the identity's active game,
+        or None if no active game exists. Used by /chess to show existing-game
+        context before attempting to start a new one."""
+        game = _row_dict(self.db.active_game(identity.owner_key))
+        if not game or game["state"] != "active":
+            return None
+        board = chess.Board(game["current_fen"])
+        turn = _color_name(board.turn)
+        human_color = game["human_color"]
+        difficulty_label = self._decorate_game(game)["difficulty_label"]
+        # Count moves so far
+        conn = self.db.connect()
+        move_count = conn.execute(
+            "SELECT COUNT(*) FROM moves WHERE game_id=? AND undone=0",
+            (game["id"],),
+        ).fetchone()[0]
+        conn.close()
+        plys = move_count
+        return (
+            f"**Game #{game['id']}** — {difficulty_label}\n"
+            f"You are **{human_color}**, it is **{turn}**'s turn ({plys} plys played)\n"
+            f"{board}"
         )
 
 

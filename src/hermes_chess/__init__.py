@@ -112,11 +112,24 @@ def _slash_handler(raw_args: str) -> str:
     # Difficulty names that imply /chess start
     _DIFF_NAMES = {"beginner", "easy", "casual", "intermediate",
                    "advanced", "expert", "maximum"}
+    is_start_cmd = action == "start" or action in _DIFF_NAMES
+    if is_start_cmd:
+        # Before trying to start, check for an existing active game.
+        # If one exists, show status instead of trying to override.
+        existing = _get_service().active_game_status(current_identity())
+        if existing:
+            return (
+                f"A game is already in progress. Here is the current status:\n\n"
+                f"{existing}\n\n"
+                f"If you want to start a new game, end the current one first "
+                f"with /chess resign or wait for it to finish. "
+                f"Type /chess help anytime for more options."
+            )
     if action == "move":
         # In CLI sessions, the latest human move should be applied and the
         # response should include the updated board in the same turn.
         args["move"] = " ".join(parts)
-    elif action == "start" or action in _DIFF_NAMES:
+    elif is_start_cmd:
         if action in _DIFF_NAMES:
             args["action"] = "start"
             args["difficulty"] = action
