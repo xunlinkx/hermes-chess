@@ -1,6 +1,6 @@
 # Hermes Chess
 
-**Persistent local human-versus-Stockfish chess** with PNG rendering, slash commands, identity isolation, and full error recovery.
+**Persistent local human-versus-Stockfish chess** with PNG rendering, slash commands, identity isolation, and full error recovery. I originally wrote this with the help of my hermes agent's Lucca and Bean, so that my wife could play chess with her bot through imessage. Planning some more features...but just wanted to get this out there for more playtesting.
 
 Author: [xunlinkx](https://github.com/xunlinkx)
 
