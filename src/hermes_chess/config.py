@@ -201,7 +201,8 @@ def current_identity() -> Identity:
     canonical = {
         "profile": profile,
         "platform": platform,
-        "session_key": session_key,
+        # session_key intentionally omitted — it changes on every iMessage
+        # session, which would fragment games across a single conversation.
         "chat_id": chat_id,
         "thread_id": thread_id,
         "user_id": user_id,
