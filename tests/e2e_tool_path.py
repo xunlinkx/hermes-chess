@@ -37,7 +37,7 @@ def call(args: dict, message_id: str) -> dict:
 
 def plugin_service():
     manager = get_plugin_manager()
-    loaded = manager._plugins["chess"]  # test-only introspection
+    loaded = manager._plugins["hermes-chess"]  # test-only introspection
     return loaded.module._get_service()
 
 
@@ -150,7 +150,7 @@ def main() -> int:
     original_fake = service.engine.fake
 
     def fail_once(board, settings, analysis):
-        from hermes_plugins.chess.engine import EngineUnavailable
+        from hermes_chess.engine import EngineUnavailable
 
         raise EngineUnavailable("simulated interruption")
 
