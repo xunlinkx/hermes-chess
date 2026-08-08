@@ -211,7 +211,7 @@ def _render_board(board: chess.Board, human_color: str, game: dict[str, Any]) ->
     status = game.get("game_status") or "active"
     last = game.get("last_move_san") or "—"
     lines.extend([
-        f"Human: {human_color.title()} | Engine: {game['engine_color'].title()}",
+        (f"PvP Mode" if not game.get('engine_color') else f"Human: {human_color.title()} | Engine: {game['engine_color'].title()}"),
         f"Difficulty: {game.get('difficulty_label') or game.get('difficulty_name')}",
         f"Last move: {last} | Turn: {turn}",
         f"Status: {status}" + (f" | Result: {game.get('result')}" if game.get("result") else ""),
@@ -367,9 +367,9 @@ class ChessService:
     ) -> dict[str, Any]:
         game_id = args.get("game_id")
         row = (
-            self.db.owned_game(identity.owner_key, game_id)
+            self.db.owned_game(identity.owner_key, game_id, chat_id=identity.chat_id, thread_id=identity.thread_id)
             if game_id
-            else self.db.active_game(identity.owner_key)
+            else self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id)
         )
         game = _row_dict(row)
         if game is None:
@@ -497,9 +497,9 @@ class ChessService:
             UPDATE games SET active=0,state='archived',game_status='archived',
                 termination_reason=COALESCE(termination_reason,'superseded by new game'),
                 completed_at=COALESCE(completed_at,?),updated_at=?
-            WHERE id=? AND owner_key=? AND active=1
+            WHERE id=? AND active=1
             """,
-            (now, now, game["id"], game["owner_key"]),
+            (now, now, game["id"]),
         )
         self.db.event(
             conn,
@@ -523,8 +523,8 @@ class ChessService:
         color = parse_color(args["color"]) if "color" in args else None
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
-                "SELECT * FROM games WHERE id=? AND owner_key=? AND active=1",
-                (game["id"], identity.owner_key),
+                "SELECT * FROM games WHERE id=? AND active=1",
+                (game["id"],),
             ).fetchone()
             if not current or current["state"] != "setup":
                 raise ValueError("Chess setup is no longer active.")
@@ -595,13 +595,15 @@ class ChessService:
         human = game["requested_color"]
         if human == "random":
             human = secrets.choice(["white", "black"])
-        engine_color = "black" if human == "white" else "white"
         settings = json.loads(game["engine_settings_json"])
+        is_pvp = settings.get("pvp", False)
+        engine_color = None if is_pvp else ("black" if human == "white" else "white")
+        pending_engine = 0 if is_pvp else (1 if human == "black" else 0)
         human_name = game.get("display_name") or "Human"
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
-                "SELECT * FROM games WHERE id=? AND owner_key=? AND active=1",
-                (game["id"], identity.owner_key),
+                "SELECT * FROM games WHERE id=? AND active=1",
+                (game["id"],),
             ).fetchone()
             if not current or current["state"] != "setup":
                 raise ValueError("Chess setup is no longer active.")
@@ -615,9 +617,9 @@ class ChessService:
                 (
                     human,
                     engine_color,
-                    human_name if human == "white" else f"Stockfish ({settings.get('label')})",
-                    human_name if human == "black" else f"Stockfish ({settings.get('label')})",
-                    1 if human == "black" else 0,
+                    "White Player" if is_pvp else (human_name if human == "white" else f"Stockfish ({settings.get('label')})"),
+                    "Black Player" if is_pvp else (human_name if human == "black" else f"Stockfish ({settings.get('label')})"),
+                    pending_engine,
                     utc_now(),
                     game["id"],
                 ),
@@ -690,8 +692,8 @@ class ChessService:
         now = datetime.now(timezone.utc)
         with self.db.transaction(immediate=True) as conn:
             row = conn.execute(
-                "SELECT * FROM games WHERE id=? AND owner_key=?",
-                (game_id, identity.owner_key),
+                "SELECT * FROM games WHERE id=?",
+                (game_id,),
             ).fetchone()
             if not row:
                 raise ValueError("Game not found for this identity.")
@@ -740,9 +742,9 @@ class ChessService:
                 conn.execute(
                     """
                     UPDATE games SET engine_claim_token=NULL,engine_claimed_at=NULL,updated_at=?
-                    WHERE id=? AND owner_key=? AND engine_claim_token=?
+                    WHERE id=? AND engine_claim_token=?
                     """,
-                    (utc_now(), claimed["id"], identity.owner_key, token),
+                    (utc_now(), claimed["id"], token),
                 )
                 self.db.event(
                     conn,
@@ -765,8 +767,8 @@ class ChessService:
         outcome = _outcome_fields(board)
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
-                "SELECT * FROM games WHERE id=? AND owner_key=?",
-                (claimed["id"], identity.owner_key),
+                "SELECT * FROM games WHERE id=?",
+                (claimed["id"],),
             ).fetchone()
             if (
                 not current
@@ -929,7 +931,7 @@ class ChessService:
         if game["state"] != "active":
             raise ValueError("The game is complete.")
         board = chess.Board(game["current_fen"])
-        if _color_name(board.turn) != game["human_color"]:
+        if game.get("engine_color") is not None and _color_name(board.turn) != game["human_color"]:
             raise ValueError("It is not the human player's turn.")
         raw_move = args.get("move", "")
         try:
@@ -947,8 +949,8 @@ class ChessService:
         outcome = _outcome_fields(board)
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
-                "SELECT * FROM games WHERE id=? AND owner_key=? AND active=1",
-                (game["id"], identity.owner_key),
+                "SELECT * FROM games WHERE id=? AND active=1",
+                (game["id"],),
             ).fetchone()
             if not current or current["current_fen"] != fen_before or current["pending_engine"]:
                 raise ValueError("The saved game changed; reload the board before moving.")
@@ -1193,8 +1195,8 @@ class ChessService:
         gives_check = board.gives_check(move)
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
-                "SELECT hint_count FROM games WHERE id=? AND owner_key=?",
-                (game["id"], identity.owner_key),
+                "SELECT hint_count FROM games WHERE id=?",
+                (game["id"],),
             ).fetchone()
             count = int(current["hint_count"]) + 1
             conn.execute(
@@ -1236,8 +1238,8 @@ class ChessService:
             raise ValueError("Only an active game can be undone.")
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
-                "SELECT * FROM games WHERE id=? AND owner_key=? AND active=1",
-                (game["id"], identity.owner_key),
+                "SELECT * FROM games WHERE id=? AND active=1",
+                (game["id"],),
             ).fetchone()
             rows = conn.execute(
                 "SELECT * FROM moves WHERE game_id=? AND undone=0 ORDER BY id DESC",
@@ -1307,12 +1309,13 @@ class ChessService:
             now = utc_now()
             conn.execute(
                 """
-                UPDATE games SET active=0,state='completed',game_status='completed',
-                    result=?,termination_reason=?,completed_at=?,updated_at=?,
-                    pending_engine=0,engine_claim_token=NULL,engine_claimed_at=NULL
-                WHERE id=? AND owner_key=? AND active=1
+                UPDATE games SET state='completed',game_status=?,
+                    result=?,termination_reason=?,active=0,completed_at=?,
+                    updated_at=?,pending_engine=0,engine_claim_token=NULL,
+                    engine_claimed_at=NULL
+                WHERE id=? AND active=1
                 """,
-                (result, reason, now, now, game["id"], identity.owner_key),
+                (reason, result, reason, now, now, game["id"]),
             )
             self.db.event(
                 conn,
@@ -1357,10 +1360,21 @@ class ChessService:
                 details={"accepted": accept},
                 message_id=identity.message_id,
             )
-            conn.execute(
-                "UPDATE games SET draw_offer_by=?,updated_at=? WHERE id=?",
-                (None if accept else None, utc_now(), game["id"]),
-            )
+            if accept:
+                conn.execute(
+                    """
+                    UPDATE games SET state='completed',game_status='completed',
+                        result='1/2-1/2',termination_reason='draw agreement',active=0,
+                        completed_at=?,updated_at=?,pending_engine=0,draw_offer_by=NULL
+                    WHERE id=?
+                    """,
+                    (utc_now(), utc_now(), game["id"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE games SET draw_offer_by=?,updated_at=? WHERE id=?",
+                    ("engine", utc_now(), game["id"]),
+                )
         if accept:
             return self._complete_manual(
                 identity, game, result="1/2-1/2", reason="draw agreement",
@@ -1435,7 +1449,7 @@ class ChessService:
                 """
                 UPDATE games SET difficulty_name=?,requested_elo=?,
                     effective_target_elo=?,engine_settings_json=?,updated_at=?
-                WHERE id=? AND owner_key=?
+                WHERE id=?
                 """,
                 (
                     parsed["name"],
@@ -1444,7 +1458,6 @@ class ChessService:
                     _json_text(parsed["settings"]),
                     utc_now(),
                     game["id"],
-                    identity.owner_key,
                 ),
             )
             self.db.event(
@@ -1568,15 +1581,26 @@ class ChessService:
     def _action_list_games(self, identity: Identity, args: dict[str, Any]):
         conn = self.db.connect()
         try:
-            rows = conn.execute(
-                """
-                SELECT id,state,human_color,difficulty_name,requested_elo,
-                    effective_target_elo,result,termination_reason,created_at,
-                    updated_at,completed_at
-                FROM games WHERE owner_key=? ORDER BY id DESC LIMIT 25
-                """,
-                (identity.owner_key,),
-            ).fetchall()
+            if identity.chat_id or identity.thread_id:
+                rows = conn.execute(
+                    """
+                    SELECT id,state,human_color,difficulty_name,requested_elo,
+                        effective_target_elo,result,termination_reason,created_at,
+                        updated_at,completed_at
+                    FROM games WHERE chat_id=? AND thread_id=? ORDER BY id DESC LIMIT 25
+                    """,
+                    (identity.chat_id, identity.thread_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id,state,human_color,difficulty_name,requested_elo,
+                        effective_target_elo,result,termination_reason,created_at,
+                        updated_at,completed_at
+                    FROM games WHERE owner_key=? ORDER BY id DESC LIMIT 25
+                    """,
+                    (identity.owner_key,),
+                ).fetchall()
         finally:
             conn.close()
         return {"success": True, "games": [dict(row) for row in rows], "count": len(rows)}
@@ -1584,10 +1608,16 @@ class ChessService:
     def _latest_game(self, identity: Identity):
         conn = self.db.connect()
         try:
-            row = conn.execute(
-                "SELECT * FROM games WHERE owner_key=? ORDER BY id DESC LIMIT 1",
-                (identity.owner_key,),
-            ).fetchone()
+            if identity.chat_id or identity.thread_id:
+                row = conn.execute(
+                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? ORDER BY id DESC LIMIT 1",
+                    (identity.chat_id, identity.thread_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM games WHERE owner_key=? ORDER BY id DESC LIMIT 1",
+                    (identity.owner_key,),
+                ).fetchone()
             return dict(row) if row else None
         finally:
             conn.close()
@@ -1613,8 +1643,8 @@ class ChessService:
         if active:
             with self.db.transaction(immediate=True) as conn:
                 current = dict(conn.execute(
-                    "SELECT * FROM games WHERE id=? AND owner_key=?",
-                    (active["id"], identity.owner_key),
+                    "SELECT * FROM games WHERE id=?",
+                    (active["id"],),
                 ).fetchone())
                 self._archive_live_game(conn, current)
         game = self._create_setup(identity)
@@ -1701,7 +1731,7 @@ class ChessService:
         }
 
     def lightweight_context(self, identity: Identity) -> str | None:
-        game = _row_dict(self.db.active_game(identity.owner_key))
+        game = _row_dict(self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id))
         if not game:
             return None
         if game["state"] == "setup":
@@ -1739,7 +1769,7 @@ class ChessService:
         """Return a human-readable status string for the identity's active game,
         or None if no active game exists. Used by /chess to show existing-game
         context before attempting to start a new one."""
-        game = _row_dict(self.db.active_game(identity.owner_key))
+        game = _row_dict(self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id))
         if not game or game["state"] != "active":
             return None
         game = self._decorate_game(game)

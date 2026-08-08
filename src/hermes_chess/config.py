@@ -72,6 +72,15 @@ DIFFICULTIES: dict[str, dict[str, Any]] = {
         "time": 0.60,
         "nodes": 120000,
     },
+    "pvp": {
+        "label": "PvP (Human vs Human)",
+        "target_elo": None,
+        "skill": 0,
+        "limit_strength": False,
+        "time": 0.1,
+        "nodes": 1,
+        "pvp": True,
+    },
 }
 
 DIFFICULTY_ALIASES = {
@@ -83,6 +92,9 @@ DIFFICULTY_ALIASES = {
     "max": "maximum",
     "unlimited": "maximum",
     "unrestricted": "maximum",
+    "multiplayer": "pvp",
+    "human": "pvp",
+    "friend": "pvp",
 }
 
 

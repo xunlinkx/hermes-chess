@@ -208,10 +208,17 @@ class ChessDatabase:
             """
         )
 
-    def active_game(self, owner_key: str, conn: sqlite3.Connection | None = None):
+    def active_game(self, owner_key: str, chat_id: str = "", thread_id: str = "", conn: sqlite3.Connection | None = None):
         owned = conn is None
         conn = conn or self.connect()
         try:
+            if chat_id or thread_id:
+                row = conn.execute(
+                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? AND active=1 ORDER BY id DESC LIMIT 1",
+                    (chat_id, thread_id),
+                ).fetchone()
+                if row:
+                    return row
             return conn.execute(
                 "SELECT * FROM games WHERE owner_key=? AND active=1 ORDER BY id DESC LIMIT 1",
                 (owner_key,),
@@ -221,11 +228,18 @@ class ChessDatabase:
                 conn.close()
 
     def owned_game(
-        self, owner_key: str, game_id: int, conn: sqlite3.Connection | None = None
+        self, owner_key: str, game_id: int, chat_id: str = "", thread_id: str = "", conn: sqlite3.Connection | None = None
     ):
         owned = conn is None
         conn = conn or self.connect()
         try:
+            if chat_id or thread_id:
+                row = conn.execute(
+                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? AND id=?",
+                    (chat_id, thread_id, game_id),
+                ).fetchone()
+                if row:
+                    return row
             return conn.execute(
                 "SELECT * FROM games WHERE owner_key=? AND id=?",
                 (owner_key, game_id),

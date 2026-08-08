@@ -353,18 +353,19 @@ class TestEngineAndPersistence:
 
 class TestIdentityAndSecurity:
     @pytest.mark.parametrize(
-        "left,right",
+        "left,right,shared",
         [
-            (ident("imsg-a", user="a"), ident("imsg-b", user="b")),
-            (ident("disc-a", platform="discord", user="a"), ident("disc-b", platform="discord", user="b")),
-            (ident("thread-a", platform="discord", thread="one"), ident("thread-b", platform="discord", thread="two")),
-            (ident("imsg", platform="photon"), ident("disc", platform="discord")),
+            (ident("imsg-a", user="a", chat="dm-a"), ident("imsg-b", user="b", chat="dm-b"), False),
+            (ident("disc-a", platform="discord", user="a", chat="chan-1"), ident("disc-b", platform="discord", user="b", chat="chan-1"), True),
+            (ident("thread-a", platform="discord", thread="one"), ident("thread-b", platform="discord", thread="two"), False),
+            (ident("imsg", platform="photon", chat="c1"), ident("disc", platform="discord", chat="c2"), False),
         ],
     )
-    def test_identity_isolation(self, config, left, right):
+    def test_identity_isolation(self, config, left, right, shared):
         svc = ChessService(config, engine_runner=fake_engine)
         start(svc, left)
-        assert svc.dispatch(right, {"action": "status"})["success"] is False
+        status = svc.dispatch(right, {"action": "status"})["success"]
+        assert status is shared
 
     def test_new_does_not_lose_game(self, service):
         first = start(service)
