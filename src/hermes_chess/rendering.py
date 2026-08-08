@@ -23,8 +23,13 @@ try:
     import cairosvg
     _cairosvg = cairosvg
     CAIROSVG_AVAILABLE = True
-except ImportError:
-    pass
+except (ImportError, OSError):
+    # cairosvg pulls in cairocffi, which raises OSError (not ImportError) when
+    # the cairo native library is absent from the loader path (e.g. the Hermes
+    # gateway venv without DYLD_LIBRARY_PATH). Treat that like the package
+    # being missing: rendering is optional and degrades to the ASCII board.
+    CAIROSVG_AVAILABLE = False
+    _cairosvg = None
 
 from .config import PluginConfig
 
