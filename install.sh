@@ -101,9 +101,9 @@ if command -v hermes &>/dev/null; then
     echo "  Run 'hermes gateway restart' to load the plugin."
 else
     echo "  Hermes not detected. Manual install options:"
-    echo "    hermes plugins install xunlinkx/chess"
+    echo "    hermes plugins install xunlinkx/hermes-chess"
     echo "    or clone directly:"
-    echo "      git clone https://github.com/xunlinkx/chess.git ~/.hermes/plugins/chess"
+    echo "      git clone https://github.com/xunlinkx/hermes-chess.git ~/.hermes/plugins/chess"
 fi
 
 # ── Verification ───────────────────────────────────────────────────

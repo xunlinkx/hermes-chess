@@ -23,8 +23,8 @@ images = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/xunlinkx/chess"
-Repository = "https://github.com/xunlinkx/chess"
+Homepage = "https://github.com/xunlinkx/hermes-chess"
+Repository = "https://github.com/xunlinkx/hermes-chess"
 
 [tool.setuptools.packages.find]
 where = ["src"]
