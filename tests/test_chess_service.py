@@ -351,21 +351,59 @@ class TestEngineAndPersistence:
         assert config.engine_concurrency == 1
 
 
+class TestPvp:
+    def _players(self, chat: str = "chan-pvp"):
+        white = ident("owner-w", platform="discord", user="user-w", chat=chat)
+        black = ident("owner-b", platform="discord", user="user-b", chat=chat)
+        return white, black
+
+    def test_pvp_start_has_no_engine_reply(self, service):
+        white, _ = self._players()
+        started = service.dispatch(white, {"action": "start", "difficulty": "pvp", "color": "white"})
+        assert started["started"] and started["human_color"] == "white"
+        assert started["engine_color"] is None and started["last_move"] is None
+        game = dict(service.db.game(started["game_id"]))
+        assert game["mode"] == "pvp" and game["pending_engine"] == 0
+
+    def test_pvp_channel_sharing(self, service):
+        white, black = self._players()
+        started = service.dispatch(white, {"action": "start", "difficulty": "pvp", "color": "white"})
+        status = service.dispatch(black, {"action": "status"})
+        assert status["success"] and status["game_id"] == started["game_id"]
+        outsider = ident("owner-c", platform="discord", user="user-c", chat="other-chan")
+        assert service.dispatch(outsider, {"action": "status"})["success"] is False
+
+    def test_pvp_side_claim_and_turn_enforcement(self, service):
+        white, black = self._players()
+        service.dispatch(white, {"action": "start", "difficulty": "pvp", "color": "white"})
+        service.dispatch(white, {"action": "move", "move": "e4"})
+        game = dict(service.db.game(service.dispatch(white, {"action": "status"})["game_id"]))
+        assert game["white_user_id"] == white.user_id and game["black_user_id"] is None
+        moved = service.dispatch(black, {"action": "move", "move": "e5"})
+        assert moved["success"]
+        game = dict(service.db.game(moved["game_id"]))
+        assert game["black_user_id"] == black.user_id
+        wrong = service.dispatch(black, {"action": "move", "move": "Nf3"})
+        assert not wrong["success"] and "not your turn" in wrong["error"].lower()
+        third = ident("owner-d", platform="discord", user="user-d", chat="chan-pvp")
+        denied = service.dispatch(third, {"action": "move", "move": "Nf3"})
+        assert not denied["success"] and "not your turn" in denied["error"].lower()
+
+
 class TestIdentityAndSecurity:
     @pytest.mark.parametrize(
-        "left,right,shared",
+        "left,right",
         [
-            (ident("imsg-a", user="a", chat="dm-a"), ident("imsg-b", user="b", chat="dm-b"), False),
-            (ident("disc-a", platform="discord", user="a", chat="chan-1"), ident("disc-b", platform="discord", user="b", chat="chan-1"), True),
-            (ident("thread-a", platform="discord", thread="one"), ident("thread-b", platform="discord", thread="two"), False),
-            (ident("imsg", platform="photon", chat="c1"), ident("disc", platform="discord", chat="c2"), False),
+            (ident("imsg-a", user="a", chat="dm-a"), ident("imsg-b", user="b", chat="dm-b")),
+            (ident("disc-a", platform="discord", user="a", chat="chan-1"), ident("disc-b", platform="discord", user="b", chat="chan-1")),
+            (ident("thread-a", platform="discord", thread="one"), ident("thread-b", platform="discord", thread="two")),
+            (ident("imsg", platform="photon", chat="c1"), ident("disc", platform="discord", chat="c2")),
         ],
     )
-    def test_identity_isolation(self, config, left, right, shared):
+    def test_identity_isolation(self, config, left, right):
         svc = ChessService(config, engine_runner=fake_engine)
         start(svc, left)
-        status = svc.dispatch(right, {"action": "status"})["success"]
-        assert status is shared
+        assert svc.dispatch(right, {"action": "status"})["success"] is False
 
     def test_new_does_not_lose_game(self, service):
         first = start(service)
@@ -407,7 +445,7 @@ class TestIdentityAndSecurity:
     def test_database_migration_initialization_and_permissions(self, service):
         integrity = service.db.integrity()
         assert integrity == {
-            "integrity": "ok", "foreign_key_errors": 0, "schema_version": 2
+            "integrity": "ok", "foreign_key_errors": 0, "schema_version": 3
         }
         assert os.stat(service.db.path).st_mode & 0o077 == 0
 

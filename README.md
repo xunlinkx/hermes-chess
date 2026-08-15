@@ -7,6 +7,7 @@ Author: [xunlinkx](https://github.com/xunlinkx)
 ## Features
 
 - Play chess against Stockfish at 8 difficulty levels (beginner → maximum)
+- **Human vs human (PvP)** — two people in the same chat/channel play each other; the engine never intervenes
 - PNG board images rendered via CairoSVG — works in iMessage, Telegram, Discord
 - Per-conversation identity isolation — multiple games, different opponents
 - Deterministic rules engine (castling, en passant, promotion, repetition, 50-move)
@@ -148,6 +149,7 @@ hermes gateway restart
 | `/chess` | Start a new game (interactive prompts for difficulty and color) |
 | `/chess <difficulty>` | Start at a specific level (beginner / easy / casual / intermediate / advanced / expert / maximum) |
 | `/chess <difficulty> <color>` | Full start: `/chess beginner black`, `/chess casual white` |
+| `/chess pvp <color>` | Start a human-vs-human game (`multiplayer`, `friend`, and `human` are aliases) |
 | `e2e4`, `Nf3`, `O-O` | Make a move (standard SAN notation) |
 | `/chess status` | Show rich game status: game ID, difficulty, colors, ply count, last move, timer state + board |
 | `/chess timer [on\|off\|status]` | Toggle per-game best-effort timing or query current state |
@@ -169,6 +171,7 @@ hermes gateway restart
 | advanced | 2000 | Expert level |
 | expert | 2300 | Master level |
 | maximum | 3000 | Full Stockfish strength |
+| pvp | — | Human vs human in a shared chat (no engine) |
 
 ### Agent / LLM instructions
 
@@ -179,6 +182,13 @@ You have the Chess plugin available. To start a game, use:
 /chess beginner black   (or any difficulty + color)
 Reply with your move in standard algebraic notation (e.g. e2e4, Nf3, O-O).
 ```
+
+> **Important:** the agent must never *play chess itself*. The agent is not the
+> opponent and must not invent moves, positions, FEN, or PGN from prose. Every
+> move — the human's and the engine's — is recorded and validated by the
+> authoritative `chess_game` tool. The agent only routes messages to that tool
+> and relays its results (PNG board + concise text). If the human is playing
+> PvP against another person, the agent's only job is to move the board along.
 
 ## Project Structure
 

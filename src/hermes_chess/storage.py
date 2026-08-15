@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def utc_now() -> str:
@@ -88,6 +88,8 @@ class ChessDatabase:
                 self._migrate_v1(conn)
             if version < 2:
                 self._migrate_v2(conn)
+            if version < 3:
+                self._migrate_v3(conn)
         finally:
             conn.close()
 
@@ -208,21 +210,42 @@ class ChessDatabase:
             """
         )
 
+    @staticmethod
+    def _migrate_v3(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            BEGIN IMMEDIATE;
+            ALTER TABLE games ADD COLUMN mode TEXT NOT NULL DEFAULT 'engine'
+                CHECK(mode IN ('engine','pvp'));
+            ALTER TABLE games ADD COLUMN white_user_id TEXT;
+            ALTER TABLE games ADD COLUMN black_user_id TEXT;
+            INSERT OR REPLACE INTO schema_meta(key,value)
+                VALUES('schema_version','3');
+            COMMIT;
+            """
+        )
+
     def active_game(self, owner_key: str, chat_id: str = "", thread_id: str = "", conn: sqlite3.Connection | None = None):
         owned = conn is None
         conn = conn or self.connect()
         try:
+            # Owner-scoped games (single-player vs engine, or a game this
+            # identity created) take precedence and are never shared.
+            row = conn.execute(
+                "SELECT * FROM games WHERE owner_key=? AND active=1 ORDER BY id DESC LIMIT 1",
+                (owner_key,),
+            ).fetchone()
+            if row:
+                return row
+            # Shared PvP games are scoped to a channel, not an owner.
             if chat_id or thread_id:
                 row = conn.execute(
-                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? AND active=1 ORDER BY id DESC LIMIT 1",
+                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? AND mode='pvp' AND active=1 ORDER BY id DESC LIMIT 1",
                     (chat_id, thread_id),
                 ).fetchone()
                 if row:
                     return row
-            return conn.execute(
-                "SELECT * FROM games WHERE owner_key=? AND active=1 ORDER BY id DESC LIMIT 1",
-                (owner_key,),
-            ).fetchone()
+            return None
         finally:
             if owned:
                 conn.close()
@@ -233,16 +256,31 @@ class ChessDatabase:
         owned = conn is None
         conn = conn or self.connect()
         try:
+            row = conn.execute(
+                "SELECT * FROM games WHERE owner_key=? AND id=?",
+                (owner_key, game_id),
+            ).fetchone()
+            if row:
+                return row
+            # A shared PvP game is accessible to any member of its channel.
             if chat_id or thread_id:
                 row = conn.execute(
-                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? AND id=?",
+                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? AND mode='pvp' AND id=?",
                     (chat_id, thread_id, game_id),
                 ).fetchone()
                 if row:
                     return row
+            return None
+        finally:
+            if owned:
+                conn.close()
+
+    def game(self, game_id: int, conn: sqlite3.Connection | None = None):
+        owned = conn is None
+        conn = conn or self.connect()
+        try:
             return conn.execute(
-                "SELECT * FROM games WHERE owner_key=? AND id=?",
-                (owner_key, game_id),
+                "SELECT * FROM games WHERE id=?", (game_id,)
             ).fetchone()
         finally:
             if owned:

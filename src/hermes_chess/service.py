@@ -74,6 +74,10 @@ def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+def _player_id(identity: Identity) -> str:
+    return (identity.user_id or identity.owner_key or "").strip()
+
+
 def _color_name(color: chess.Color) -> str:
     return "white" if color == chess.WHITE else "black"
 
@@ -374,6 +378,13 @@ class ChessService:
         game = _row_dict(row)
         if game is None:
             raise ValueError("No chess game is available for this messaging identity.")
+        if game["owner_key"] != identity.owner_key and not (
+            game.get("mode") == "pvp"
+            and identity.chat_id
+            and identity.chat_id == game.get("chat_id")
+            and identity.thread_id == game.get("thread_id")
+        ):
+            raise ValueError("No chess game is available for this messaging identity.")
         if require_active and game["state"] not in {"setup", "active"}:
             raise ValueError("That game is complete. Start a new game or request a rematch.")
         return game
@@ -569,7 +580,7 @@ class ChessService:
                     details={"color": color},
                     message_id=identity.message_id,
                 )
-        updated = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or {}
+        updated = _row_dict(self.db.game(game["id"])) or {}
         if difficulty:
             updated["_difficulty_note"] = difficulty["note"]
             updated["_difficulty_clamped"] = difficulty["clamped"]
@@ -599,6 +610,13 @@ class ChessService:
         is_pvp = settings.get("pvp", False)
         engine_color = None if is_pvp else ("black" if human == "white" else "white")
         pending_engine = 0 if is_pvp else (1 if human == "black" else 0)
+        mode = "pvp" if is_pvp else "engine"
+        if is_pvp:
+            white_user = _player_id(identity) if human == "white" else None
+            black_user = _player_id(identity) if human == "black" else None
+        else:
+            white_user = _player_id(identity) if human == "white" else "engine"
+            black_user = _player_id(identity) if human == "black" else "engine"
         human_name = game.get("display_name") or "Human"
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
@@ -611,7 +629,7 @@ class ChessService:
                 """
                 UPDATE games SET state='active',game_status='active',
                     human_color=?,engine_color=?,pgn_white=?,pgn_black=?,
-                    pending_engine=?,updated_at=?
+                    pending_engine=?,mode=?,white_user_id=?,black_user_id=?,updated_at=?
                 WHERE id=?
                 """,
                 (
@@ -620,6 +638,9 @@ class ChessService:
                     "White Player" if is_pvp else (human_name if human == "white" else f"Stockfish ({settings.get('label')})"),
                     "Black Player" if is_pvp else (human_name if human == "black" else f"Stockfish ({settings.get('label')})"),
                     pending_engine,
+                    mode,
+                    white_user,
+                    black_user,
                     utc_now(),
                     game["id"],
                 ),
@@ -632,7 +653,7 @@ class ChessService:
                 details={"human_color": human, "difficulty": game["difficulty_name"]},
                 message_id=identity.message_id,
             )
-        started = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or {}
+        started = _row_dict(self.db.game(game["id"])) or {}
         if human == "black":
             recovered = self._engine_turn(identity, started)
             if not recovered.get("success"):
@@ -643,7 +664,7 @@ class ChessService:
                     "difficulty": settings.get("label"),
                 })
                 return recovered
-            started = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or {}
+            started = _row_dict(self.db.game(game["id"])) or {}
         payload = self._payload(started)
         payload.update({
             "setup": False,
@@ -659,7 +680,7 @@ class ChessService:
         return payload
 
     def _setup_or_start(self, identity: Identity, args: dict[str, Any], *, action: str):
-        game = _row_dict(self.db.active_game(identity.owner_key))
+        game = _row_dict(self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id))
         supplied_complete = "difficulty" in args and "color" in args
         if game and game["state"] == "active":
             # Never silently override an active game. Return existing game info
@@ -878,7 +899,7 @@ class ChessService:
     def _recover(self, identity: Identity, game: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
         if game["state"] == "active" and game["pending_engine"]:
             result = self._engine_turn(identity, game)
-            refreshed = _row_dict(self.db.owned_game(identity.owner_key, game["id"]))
+            refreshed = _row_dict(self.db.game(game["id"]))
             if result.get("success") and result.get("engine_move"):
                 with self.db.transaction(immediate=True) as conn:
                     self.db.event(
@@ -933,6 +954,11 @@ class ChessService:
         board = chess.Board(game["current_fen"])
         if game.get("engine_color") is not None and _color_name(board.turn) != game["human_color"]:
             raise ValueError("It is not the human player's turn.")
+        moving_side = _color_name(board.turn)
+        if game.get("mode") == "pvp":
+            claimed = game.get("white_user_id" if moving_side == "white" else "black_user_id")
+            if claimed and claimed != _player_id(identity):
+                raise ValueError(f"It is not your turn; {moving_side} is played by another user.")
         raw_move = args.get("move", "")
         try:
             move = _parse_move(board, raw_move)
@@ -947,6 +973,8 @@ class ChessService:
         san = board.san(move)
         board.push(move)
         outcome = _outcome_fields(board)
+        is_pvp = game.get("mode") == "pvp"
+        pending_after = 0 if (is_pvp or outcome["completed"]) else 1
         with self.db.transaction(immediate=True) as conn:
             current = conn.execute(
                 "SELECT * FROM games WHERE id=? AND active=1",
@@ -992,12 +1020,18 @@ class ChessService:
                     "completed" if outcome["completed"] else "active",
                     0 if outcome["completed"] else 1,
                     utc_now() if outcome["completed"] else None,
-                    0 if outcome["completed"] else 1,
+                    pending_after,
                     identity.message_id or None,
                     utc_now(),
                     game["id"],
                 ),
             )
+            if is_pvp:
+                side_col = "white_user_id" if moving_side == "white" else "black_user_id"
+                conn.execute(
+                    f"UPDATE games SET {side_col}=?,updated_at=? WHERE id=? AND {side_col} IS NULL",
+                    (_player_id(identity), utc_now(), game["id"]),
+                )
             self.db.event(
                 conn,
                 owner_key=identity.owner_key,
@@ -1006,10 +1040,19 @@ class ChessService:
                 details={"san": san, "uci": move.uci()},
                 message_id=identity.message_id,
             )
-        after_human = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or game
+        after_human = _row_dict(self.db.game(game["id"])) or game
         if outcome["completed"]:
             payload = self._payload(after_human)
             payload.update({"human_move": san, "engine_move": None, "message": "Game complete."})
+            return payload
+        if is_pvp:
+            payload = self._payload(after_human)
+            payload.update({
+                "human_move": san,
+                "human_move_uci": move.uci(),
+                "engine_move": None,
+                "message": f"You played {san}. {_color_name(board.turn).title()} to move.",
+            })
             return payload
         engine_result = self._engine_turn(identity, after_human)
         if not engine_result.get("success"):
@@ -1021,7 +1064,7 @@ class ChessService:
                 "message": "Your move is saved; Stockfish's reply remains pending.",
             })
             return payload
-        final_game = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or after_human
+        final_game = _row_dict(self.db.game(game["id"])) or after_human
         payload = self._payload(final_game)
         payload.update({
             "human_move": san,
@@ -1069,7 +1112,7 @@ class ChessService:
         return self._read_with_recovery(identity, args, "Current saved board.")
 
     def _action_status(self, identity: Identity, args: dict[str, Any]):
-        game = _row_dict(self.db.active_game(identity.owner_key))
+        game = _row_dict(self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id))
         if not game or game["state"] != "active":
             return self._read_with_recovery(identity, args, "Current saved game status.")
         # Enrich status with game identity info for active games
@@ -1288,7 +1331,7 @@ class ChessService:
                 details={"moves": [row["san"] for row in reversed(selected)]},
                 message_id=identity.message_id,
             )
-        refreshed = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or game
+        refreshed = _row_dict(self.db.game(game["id"])) or game
         payload = self._payload(refreshed)
         payload.update({
             "undone_moves": [row["san"] for row in reversed(selected)],
@@ -1325,7 +1368,7 @@ class ChessService:
                 details={"result": result, "reason": reason},
                 message_id=identity.message_id,
             )
-        completed = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or game
+        completed = _row_dict(self.db.game(game["id"])) or game
         payload = self._payload(completed)
         payload["message"] = f"Game ended by {reason}. Result: {result}."
         return payload
@@ -1514,6 +1557,8 @@ class ChessService:
             conn.close()
         if game["state"] != "setup" and moves:
             raise ValueError("Color cannot change after play begins; start a new game.")
+        if game["state"] == "active" and game.get("mode") == "pvp":
+            raise ValueError("Color is fixed once a PvP game has started.")
         if game["state"] == "setup":
             updated = self._apply_setup_choices(identity, game, {"color": color})
             return self._finalize_setup(identity, updated)
@@ -1527,12 +1572,12 @@ class ChessService:
                 """,
                 (color, human, engine, 1 if human == "black" else 0, utc_now(), game["id"]),
             )
-        refreshed = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or game
+        refreshed = _row_dict(self.db.game(game["id"])) or game
         if human == "black":
             engine_result = self._engine_turn(identity, refreshed)
             if not engine_result.get("success"):
                 return engine_result
-            refreshed = _row_dict(self.db.owned_game(identity.owner_key, game["id"])) or refreshed
+            refreshed = _row_dict(self.db.game(game["id"])) or refreshed
         return self._payload(refreshed)
 
     def _build_pgn(self, game: dict[str, Any]) -> str:
@@ -1639,7 +1684,7 @@ class ChessService:
             difficulty = previous["requested_elo"]
         else:
             difficulty = previous["difficulty_name"]
-        active = _row_dict(self.db.active_game(identity.owner_key))
+        active = _row_dict(self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id))
         if active:
             with self.db.transaction(immediate=True) as conn:
                 current = dict(conn.execute(
@@ -1680,7 +1725,7 @@ class ChessService:
         approximation. Not suitable for tournament-level or fair-play
         time control.
         """
-        game = _row_dict(self.db.active_game(identity.owner_key))
+        game = _row_dict(self.db.active_game(identity.owner_key, chat_id=identity.chat_id, thread_id=identity.thread_id))
         if not game or game["state"] != "active":
             return {
                 "success": True,

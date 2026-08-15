@@ -36,9 +36,12 @@ def call(args: dict, message_id: str) -> dict:
 
 
 def plugin_service():
-    manager = get_plugin_manager()
-    loaded = manager._plugins["hermes-chess"]  # test-only introspection
-    return loaded.module._get_service()
+    # Reach the service through the SAME import the deployed root __init__.py
+    # performs (it adds src/ to sys.path then does `from hermes_chess import *`),
+    # rather than introspecting a private _get_service on the shim module.
+    import hermes_chess
+
+    return hermes_chess._get_service()
 
 
 def slash(raw_args: str, message_id: str) -> str:

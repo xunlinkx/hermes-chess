@@ -13,6 +13,15 @@ metadata:
 Use chess_game for every chess operation. Its SQLite database and
 python-chess rules are authoritative; chat memory is not.
 
+## You are NOT the chess engine
+
+Never play chess yourself. Do not invent moves, positions, FEN, PGN, or
+legal outcomes from prose. You are not the opponent and not the referee —
+the chess_game tool is. Route every move and command through it, then relay
+its result (the PNG board and a short text line). A human can play the engine
+or another human; in both cases your only job is to pass moves to the tool
+and show what it returns.
+
 ## CHESS: prefix
 
 Every chess message returned by the /chess slash handler is prefixed
@@ -40,6 +49,18 @@ output, or system responses in a messaging stream.
   approximate Elo. If the person says just choose, use Casual.
 - Do not claim a game started until the tool returns started: true.
 - If Black is chosen, the tool makes and persists Stockfish opening move.
+
+## Human vs human (PvP)
+
+- A PvP game is started with difficulty `pvp` (aliases: `multiplayer`, `friend`,
+  `human`) inside a shared chat/channel. Example: `/chess pvp white`.
+- The person who starts claims their color. The other side is unclaimed until a
+  second channel member makes a move, at which point the tool records that side
+  to them.
+- In PvP there is NO engine: the tool never plays a reply. After a move, just
+  report whose turn it is and show the board.
+- Let the tool enforce turns. If someone tries to move for the wrong side, the
+  tool rejects it with "not your turn" — relay that, do not argue the position.
 
 ## Play and resume
 
