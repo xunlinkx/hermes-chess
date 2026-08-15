@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
+from pathlib import Path
 
 from gateway.session_context import clear_session_vars, set_session_vars
 from hermes_cli.plugins import get_plugin_manager
@@ -79,6 +82,11 @@ def count_moves(game_id: int, actor: str | None = None) -> int:
 
 def main() -> int:
     phase = sys.argv[1] if len(sys.argv) > 1 else "all"
+    # Isolate the chess DB so this E2E never touches production state.
+    e2e_db = os.environ.get("HERMES_CHESS_E2E_DB")
+    if not e2e_db:
+        e2e_db = str(Path(tempfile.gettempdir()) / "hermes-chess-e2e" / "chess.sqlite3")
+    os.environ["HERMES_CHESS_DB"] = e2e_db
     manager = get_plugin_manager()
     manager.discover_and_load(force=True)
     if "chess_game" not in manager._plugin_tool_names:
