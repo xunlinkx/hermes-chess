@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import shlex
+from pathlib import Path
 from typing import Any, Dict
 
 from .config import capture_gateway_identity
@@ -254,3 +255,32 @@ def register(ctx: Any) -> None:
     )
     ctx.register_hook("pre_llm_call", _pre_llm_context)
     ctx.register_hook("pre_gateway_dispatch", _pre_gateway_dispatch)
+    _register_skill(ctx)
+
+
+def _register_skill(ctx: Any) -> None:
+    """Expose the shipped guidance skill as ``hermes-chess:chess``.
+
+    The SKILL.md lives at the repo root (outside ``src/``) so a pip-installed
+    package may not have it next to ``__file__``. Resolve it relative to this
+    module's repo root and skip gracefully when absent. This skill is the
+    authoritative anti-hallucination guidance (SQLite/python-chess rules are
+    authoritative; never infer a position from chat).
+    """
+    skill_md = Path(__file__).resolve().parents[2] / "skills" / "chess" / "SKILL.md"
+    if not skill_md.exists():
+        logger.debug("chess SKILL.md not found at %s; skill registration skipped", skill_md)
+        return
+    try:
+        ctx.register_skill(
+            name="chess",
+            path=skill_md,
+            description=(
+                "Start, configure, resume, play, display, analyze, undo, or end "
+                "a chess game. Route normal chess conversation and plausible "
+                "SAN/UCI moves through the persistent local chess_game tool."
+            ),
+            frontmatter={"name": "chess"},
+        )
+    except Exception:
+        logger.debug("chess skill registration skipped", exc_info=True)
