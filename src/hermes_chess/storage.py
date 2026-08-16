@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def utc_now() -> str:
@@ -90,6 +90,8 @@ class ChessDatabase:
                 self._migrate_v2(conn)
             if version < 3:
                 self._migrate_v3(conn)
+            if version < 4:
+                self._migrate_v4(conn)
         finally:
             conn.close()
 
@@ -132,7 +134,7 @@ class ChessDatabase:
                 engine_claim_token TEXT,
                 engine_claimed_at TEXT,
                 pgn_event TEXT NOT NULL DEFAULT 'Hermes Local Chess',
-                pgn_site TEXT NOT NULL DEFAULT 'Luna',
+                pgn_site TEXT NOT NULL DEFAULT 'Hermes Local Chess',
                 pgn_date TEXT NOT NULL,
                 pgn_round TEXT NOT NULL DEFAULT '-',
                 pgn_white TEXT,
@@ -221,6 +223,18 @@ class ChessDatabase:
             ALTER TABLE games ADD COLUMN black_user_id TEXT;
             INSERT OR REPLACE INTO schema_meta(key,value)
                 VALUES('schema_version','3');
+            COMMIT;
+            """
+        )
+
+    @staticmethod
+    def _migrate_v4(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            BEGIN IMMEDIATE;
+            UPDATE games SET pgn_site='Hermes Local Chess' WHERE pgn_site='Luna';
+            INSERT OR REPLACE INTO schema_meta(key,value)
+                VALUES('schema_version','4');
             COMMIT;
             """
         )

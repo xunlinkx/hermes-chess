@@ -1632,9 +1632,11 @@ class ChessService:
                     SELECT id,state,human_color,difficulty_name,requested_elo,
                         effective_target_elo,result,termination_reason,created_at,
                         updated_at,completed_at
-                    FROM games WHERE chat_id=? AND thread_id=? ORDER BY id DESC LIMIT 25
+                    FROM games
+                    WHERE owner_key=? OR (chat_id=? AND thread_id=? AND mode='pvp')
+                    ORDER BY id DESC LIMIT 25
                     """,
-                    (identity.chat_id, identity.thread_id),
+                    (identity.owner_key, identity.chat_id, identity.thread_id),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -1655,8 +1657,8 @@ class ChessService:
         try:
             if identity.chat_id or identity.thread_id:
                 row = conn.execute(
-                    "SELECT * FROM games WHERE chat_id=? AND thread_id=? ORDER BY id DESC LIMIT 1",
-                    (identity.chat_id, identity.thread_id),
+                    "SELECT * FROM games WHERE owner_key=? OR (chat_id=? AND thread_id=? AND mode='pvp') ORDER BY id DESC LIMIT 1",
+                    (identity.owner_key, identity.chat_id, identity.thread_id),
                 ).fetchone()
             else:
                 row = conn.execute(

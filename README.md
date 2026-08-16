@@ -48,13 +48,13 @@ hermes plugins install xunlinkx/hermes-chess
 hermes gateway restart
 ```
 
-This clones the repo into `~/.hermes/plugins/chess/` as a regular directory and
+This clones the repo into `~/.hermes/plugins/hermes-chess/` as a regular directory and
 the gateway discovers it automatically via `plugin.yaml`.
 
 To update later:
 
 ```bash
-hermes plugins update chess
+hermes plugins update hermes-chess
 hermes gateway restart         # only needed for handler/plugin.yaml changes
 ```
 
@@ -62,7 +62,7 @@ hermes gateway restart         # only needed for handler/plugin.yaml changes
 
 ```bash
 git clone https://github.com/xunlinkx/hermes-chess.git \
-  ~/.hermes/plugins/chess
+  ~/.hermes/plugins/hermes-chess
 pip install python-chess CairoSVG    # into your Hermes venv
 hermes gateway restart
 ```
@@ -92,17 +92,17 @@ push changes to the live Hermes plugin:
 
 ```bash
 # 1. Make changes and verify
-cd ~/hermes-chess   # your local clone
+cd hermes-chess   # your local clone
 pytest tests/
 
 # 2. Sync to the Hermes plugin directory
-rsync -a --delete src/hermes_chess/ ~/.hermes/plugins/chess/
+rsync -a --delete src/hermes_chess/ ~/.hermes/plugins/hermes-chess/
 
 # 3. Restart gateway to pick up handler changes
 hermes gateway restart
 ```
 
-> If you use a symlink (`ln -s src/hermes_chess ~/.hermes/plugins/chess`),
+> If you use a symlink (`ln -s src/hermes_chess ~/.hermes/plugins/hermes-chess`),
 > edits take effect immediately — only restart the gateway for plugin metadata
 > or handler registration changes.
 
@@ -138,7 +138,7 @@ hermes gateway restart
 | **Gateway ignores plugin after update** | Old commands still work unchanged | You must restart the gateway: `hermes gateway restart` |
 | **Two profiles, one shares the same DB** | Moves from one profile appear in another | Each profile needs its own `HERMES_CHESS_DB` path, or use different `owner_key` values |
 | **Stockfish path vs brew location** | Plugin works in terminal but not in gateway | The gateway process may not have the same `PATH`. Set `HERMES_CHESS_STOCKFISH` explicitly to the absolute binary path |
-| **Plugin not registered** | `/chess` returns "unknown command" | Ensure `~/.hermes/plugins/chess/plugin.yaml` exists and gateway has been restarted. Verify with `hermes plugins list` |
+| **Plugin not registered** | `/chess` returns "unknown command" | Ensure `~/.hermes/plugins/hermes-chess/plugin.yaml` exists and gateway has been restarted. Verify with `hermes plugins list` |
 
 ## Usage
 

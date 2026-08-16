@@ -389,6 +389,16 @@ class TestPvp:
         denied = service.dispatch(third, {"action": "move", "move": "Nf3"})
         assert not denied["success"] and "not your turn" in denied["error"].lower()
 
+    def test_list_games_owner_scoped_in_shared_channel(self, service):
+        white, black = self._players()
+        start(service, white)
+        assert service.dispatch(black, {"action": "list_games"})["count"] == 0
+
+        service.dispatch(white, {"action": "resign"})
+        pvp = service.dispatch(white, {"action": "start", "difficulty": "pvp", "color": "white"})
+        shared = service.dispatch(black, {"action": "list_games"})
+        assert shared["count"] == 1 and shared["games"][0]["id"] == pvp["game_id"]
+
 
 class TestIdentityAndSecurity:
     @pytest.mark.parametrize(
@@ -445,7 +455,7 @@ class TestIdentityAndSecurity:
     def test_database_migration_initialization_and_permissions(self, service):
         integrity = service.db.integrity()
         assert integrity == {
-            "integrity": "ok", "foreign_key_errors": 0, "schema_version": 3
+            "integrity": "ok", "foreign_key_errors": 0, "schema_version": 4
         }
         assert os.stat(service.db.path).st_mode & 0o077 == 0
 

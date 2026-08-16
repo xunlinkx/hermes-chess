@@ -47,6 +47,8 @@ output, or system responses in a messaging stream.
   random). Ask only for fields listed in missing_choices.
 - Offer Beginner, Easy, Casual, Intermediate, Advanced, Expert, Maximum, or an
   approximate Elo. If the person says just choose, use Casual.
+- Pass named difficulties (easy, casual, expert, ...) verbatim — never remap
+  one to a custom Elo. Only send a numeric Elo when the user states a number.
 - Do not claim a game started until the tool returns started: true.
 - If Black is chosen, the tool makes and persists Stockfish opening move.
 

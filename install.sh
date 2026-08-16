@@ -11,7 +11,7 @@ set -euo pipefail
 #   # or as root: sudo ./install.sh (for system packages only)
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLUGIN_DIR="${HERMES_HOME:-$HOME/.hermes}/plugins/chess"
+PLUGIN_DIR="${HERMES_HOME:-$HOME/.hermes}/plugins/hermes-chess"
 VENV_DIR="${REPO_DIR}/.venv"
 PYTHON="${PYTHON:-python3}"
 
@@ -103,7 +103,7 @@ else
     echo "  Hermes not detected. Manual install options:"
     echo "    hermes plugins install xunlinkx/hermes-chess"
     echo "    or clone directly:"
-    echo "      git clone https://github.com/xunlinkx/hermes-chess.git ~/.hermes/plugins/chess"
+    echo "      git clone https://github.com/xunlinkx/hermes-chess.git ~/.hermes/plugins/hermes-chess"
 fi
 
 # ── Verification ───────────────────────────────────────────────────

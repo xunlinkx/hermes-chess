@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-chess"
-version = "1.1.0"
+version = "1.2.0"
 description = "Persistent local human-versus-Stockfish chess with PNG rendering, slash commands, and identity isolation"
 authors = [
     {name = "xunlinkx", email = "xunlinkx@users.noreply.github.com"},
