@@ -7,6 +7,7 @@ import logging
 import shlex
 from typing import Any, Dict
 
+from .config import capture_gateway_identity
 from .service import ChessService, current_identity
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,18 @@ def _pre_llm_context(**_kwargs: Any) -> Dict[str, str] | None:
         return None
 
 
+def _pre_gateway_dispatch(event: Any = None, **_kwargs: Any) -> None:
+    """Snapshot the sender identity before slash commands dispatch.
+
+    Fired once per incoming MessageEvent, BEFORE auth/pairing and before the
+    gateway binds HERMES_SESSION_* ContextVars. Without this, ``/chess`` (which
+    dispatches before session binding) resolves ``current_identity()`` to the
+    local user instead of the messaging sender. Always returns None so normal
+    dispatch is never influenced.
+    """
+    capture_gateway_identity(getattr(event, "source", None))
+
+
 def register(ctx: Any) -> None:
     ctx.register_tool(
         name="chess_game",
@@ -240,3 +253,4 @@ def register(ctx: Any) -> None:
         args_hint="[start|move|board|status|continue|hint|analyze|undo|resign|pgn|rematch]",
     )
     ctx.register_hook("pre_llm_call", _pre_llm_context)
+    ctx.register_hook("pre_gateway_dispatch", _pre_gateway_dispatch)

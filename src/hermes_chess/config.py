@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import os
@@ -11,6 +12,17 @@ from pathlib import Path
 from typing import Any
 
 from .gateway.session_context import get_session_env
+
+# Captured messaging identity, set by the plugin's ``pre_gateway_dispatch``
+# hook. Slash commands are dispatched BEFORE the gateway binds the
+# HERMES_SESSION_* ContextVars, so ``current_identity()`` cannot resolve the
+# sender from the session context alone at that point. The hook snapshots
+# ``event.source`` into this task-local ContextVar, and ``current_identity()``
+# prefers it over the (unset) session vars. ContextVars are context-local, so
+# concurrent messages never observe each other's identity.
+_GATEWAY_IDENTITY: "contextvars.ContextVar[Identity | None]" = contextvars.ContextVar(
+    "hermes_chess_gateway_identity", default=None
+)
 
 DIFFICULTIES: dict[str, dict[str, Any]] = {
     "beginner": {
@@ -163,6 +175,7 @@ class Identity:
     user_id: str
     display_name: str
     message_id: str
+    chat_type: str = ""
 
     def with_message_id(self, message_id: str) -> "Identity":
         return Identity(
@@ -176,6 +189,7 @@ class Identity:
             user_id=self.user_id,
             display_name=self.display_name,
             message_id=message_id,
+            chat_type=self.chat_type,
         )
 
 
@@ -186,11 +200,64 @@ def _safe_identity_part(value: str, maximum: int = 512) -> str:
     return value
 
 
+def _build_identity(
+    *,
+    profile: str,
+    platform: str,
+    source: str,
+    session_key: str,
+    chat_type: str,
+    chat_id: str,
+    thread_id: str,
+    user_id: str,
+    display_name: str,
+    message_id: str,
+) -> Identity:
+    # owner_key v2 deliberately EXCLUDES session_key. session_key is derived
+    # deterministically from (profile, platform, chat_type, chat_id, thread_id,
+    # user_id) by the gateway, so it is redundant for identity — and it is NOT
+    # available at slash-command dispatch time (the pre_gateway_dispatch hook
+    # only sees event.source, never the session key). Dropping it lets both the
+    # slash-command and natural-language paths derive byte-identical owner keys.
+    # chat_type preserves the DM/group/channel disambiguation session_key used
+    # to provide. Bumped v1 -> v2; no migration because games were wiped.
+    canonical = {
+        "profile": profile,
+        "platform": platform,
+        "chat_type": chat_type,
+        "chat_id": chat_id,
+        "thread_id": thread_id,
+        "user_id": user_id,
+    }
+    if not any((chat_type, chat_id, thread_id, user_id, profile)):
+        raise ValueError("No stable Hermes session identity is available.")
+    digest = hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return Identity(
+        owner_key=f"v2:{digest}",
+        profile=profile,
+        platform=platform,
+        source=source,
+        session_key=session_key,
+        chat_type=chat_type,
+        chat_id=chat_id,
+        thread_id=thread_id,
+        user_id=user_id,
+        display_name=display_name,
+        message_id=message_id,
+    )
+
+
 def current_identity() -> Identity:
+    captured = _GATEWAY_IDENTITY.get()
+    if captured is not None:
+        return captured
     profile = _safe_identity_part(get_session_env("HERMES_SESSION_PROFILE") or "default", 64)
     platform = _safe_identity_part(get_session_env("HERMES_SESSION_PLATFORM") or "local", 64).lower()
     source = _safe_identity_part(get_session_env("HERMES_SESSION_SOURCE"), 64)
     session_key = _safe_identity_part(get_session_env("HERMES_SESSION_KEY"), 512)
+    chat_type = _safe_identity_part(get_session_env("HERMES_SESSION_CHAT_TYPE"), 64)
     chat_id = _safe_identity_part(get_session_env("HERMES_SESSION_CHAT_ID"), 512)
     thread_id = _safe_identity_part(get_session_env("HERMES_SESSION_THREAD_ID"), 512)
     user_id = _safe_identity_part(get_session_env("HERMES_SESSION_USER_ID"), 512)
@@ -210,36 +277,64 @@ def current_identity() -> Identity:
         if not profile:
             profile = user_id or "default"
 
-    # IMPORTANT: session_key is included in the owner_key hash for completeness,
-    # but is currently empty ("") for most gateway platforms. If a platform
-    # starts providing a non-empty session_key, existing games under the old
-    # hash become orphaned. See commit f7e3240 (revert of session_key removal)
-    # for history. Any change here must consider migration of existing games.
-    canonical = {
-        "profile": profile,
-        "platform": platform,
-        "session_key": session_key,
-        "chat_id": chat_id,
-        "thread_id": thread_id,
-        "user_id": user_id,
-    }
-    if not any((session_key, chat_id, thread_id, user_id, profile)):
-        raise ValueError("No stable Hermes session identity is available.")
-    digest = hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return Identity(
-        owner_key=f"v1:{digest}",
+    return _build_identity(
         profile=profile,
         platform=platform,
         source=source,
         session_key=session_key,
+        chat_type=chat_type,
         chat_id=chat_id,
         thread_id=thread_id,
         user_id=user_id,
         display_name=display_name,
         message_id=message_id,
     )
+
+
+def identity_from_source(source: Any) -> Identity | None:
+    """Build a plugin Identity from a gateway SessionSource.
+
+    Mirrors ``gateway/run.py:_set_session_env`` so the resulting owner_key
+    matches what ``current_identity()`` would resolve from the bound session
+    vars. Returns None when the source carries no usable identity (e.g. an
+    anonymous/system event), so callers leave the captured identity unset.
+    """
+    if source is None:
+        return None
+    platform_value = getattr(source, "platform", None)
+    platform = str(platform_value.value if platform_value else "").strip().lower() or "local"
+    profile = _safe_identity_part(getattr(source, "profile", "") or "default", 64)
+    chat_type = _safe_identity_part(getattr(source, "chat_type", "") or "", 64)
+    chat_id = _safe_identity_part(getattr(source, "chat_id", "") or "", 512)
+    thread_id = _safe_identity_part(getattr(source, "thread_id", "") or "", 512)
+    user_id = _safe_identity_part(getattr(source, "user_id", "") or "", 512)
+    display_name = _safe_identity_part(getattr(source, "user_name", "") or "", 256)
+    message_id = _safe_identity_part(getattr(source, "message_id", "") or "", 512)
+    try:
+        return _build_identity(
+            profile=profile,
+            platform=platform,
+            source="",
+            session_key="",
+            chat_type=chat_type,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            display_name=display_name,
+            message_id=message_id,
+        )
+    except ValueError:
+        return None
+
+
+def capture_gateway_identity(source: Any) -> None:
+    """Snapshot a gateway message source into the task-local identity ContextVar.
+
+    Called from the plugin's ``pre_gateway_dispatch`` hook so slash commands
+    (dispatched before session binding) can resolve the sender. A source with
+    no usable identity clears the slot rather than leaving a stale value.
+    """
+    _GATEWAY_IDENTITY.set(identity_from_source(source))
 
 
 def parse_difficulty(

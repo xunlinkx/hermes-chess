@@ -10,6 +10,7 @@ provides_tools:
   - chess_game
 hooks:
   - pre_llm_call
+  - pre_gateway_dispatch
 optional_env:
   - name: HERMES_CHESS_STOCKFISH
     description: "Absolute path to the local Stockfish executable."
